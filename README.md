@@ -38,7 +38,7 @@ function connect(): void
 }
 
 connect();
-// At this point the SSH tunnel is disconnected because `$tunnel` went out of scope.
+// At this point the SSH tunnel is disconnected because $tunnel went out of scope.
 ```
 
 This will work:
