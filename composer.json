@@ -18,8 +18,7 @@
   },
   "minimum-stability": "stable",
   "require": {
-    "php": ">=8.0",
-    "ext-posix": "*"
+    "php": ">=8.0"
   },
   "require-dev": {
     "squizlabs/php_codesniffer": "^3.7",

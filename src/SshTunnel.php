@@ -21,9 +21,9 @@ class SshTunnel
 
     /**
      * The command for creating the tunnel
-     * @var string
+     * @var array<string>
      */
-    protected string $sshCommand;
+    protected array $sshCommand;
 
     /**
      * Command for checking if the tunnel is open
@@ -45,9 +45,9 @@ class SshTunnel
 
     /**
      * The SSH process opened using proc_open
-     * @var resource|false
+     * @var array<resource|array<resource>>
      */
-    protected $sshProcess;
+    protected array $sshProcess;
 
     /**
      * Constructor
@@ -60,18 +60,15 @@ class SshTunnel
      * @param string $bindHost Hostname or IP of the remote side of the tunnel. This can also be another server which
      *                         is reachable from inside the SSH Host. 127.0.0.1 by default (localhost on the SSH Host).
      * @param int $bindPort Port of the remote side of the tunnel, 3306 by default.
-     * @param string $verifyMethod Can be 'nc', 'bash' or empty to skip verify.
      * @param string $identityFile A file containing your private key. Empty by default.
      * @param int $waitMs Milliseconds to wait after connecting, 1000000 = 1 second by default.
      * @param int $tries Number of attempts to verify connection.
-     * @param string $sshOptions Extra SSH options, empty by default.
-     * @param string $logPath Where to send logging, /dev/null by default
+     * @param array<string> $sshOptions Extra SSH options, empty by default.
      * @param bool $autoConnect If true (default) the SSH tunnel will be connected on creation of this object.
      * @param bool $autoDisconnect If true (default) the SSH tunnel will be removed when this object is destroyed.
      * @param string $sshPath Path to 'ssh' binary.
-     * @param string $lsofPath Path to 'lsof' binary. Can be set to empty to skip check if local port is available.
-     * @param string $ncPath Path to 'nc' binary.
-     * @param string $bashPath Path to 'bash' binary.
+     * @param string $lsofPath Path to 'lsof' binary, used to check if local port is available. Can be empty.
+     * @param string $ncPath Path to 'nc' binary, used to verify the SSH tunnel is working. Can be empty.
      * @throws \ErrorException
      */
     public function __construct(
@@ -82,18 +79,15 @@ class SshTunnel
         int $localPort = 0,
         string $bindHost = '127.0.0.1',
         int $bindPort = 3306,
-        string $verifyMethod = 'bash',
         string $identityFile = '',
         protected int $waitMs = 1000000,
         protected int $tries = 10,
-        string $sshOptions = '-q',
-        string $logPath = '/dev/null',
+        array $sshOptions = ['-q'],
         bool $autoConnect = true,
         protected bool $autoDisconnect = true,
         string $sshPath = 'ssh',
         string $lsofPath = 'lsof',
-        string $ncPath = 'nc',
-        string $bashPath = 'bash'
+        string $ncPath = 'nc'
     ) {
         if (!empty($lsofPath)) {
             $this->lsofCommand = sprintf(
@@ -110,43 +104,36 @@ class SshTunnel
         }
 
         if (!empty($identityFile)) {
-            $sshOptions .= ' -i ' . escapeshellarg($identityFile);
+            $sshOptions = array_merge(
+                $sshOptions,
+                [
+                    '-i',
+                    $identityFile
+                ]
+            );
         }
-        $this->sshCommand = sprintf(
-            '%s %s -N -L %d:%s:%d -p %d %s@%s >> %s 2>&1',
-            escapeshellcmd($sshPath),
+        $this->sshCommand = array_merge(
+            [
+                $sshPath
+            ],
             $sshOptions,
-            $this->localPort,
-            escapeshellarg($bindHost),
-            $bindPort,
-            $sshPort,
-            escapeshellarg($sshUsername),
-            escapeshellarg($sshHost),
-            escapeshellarg($logPath)
+            [
+                '-N',
+                '-L',
+                $this->localPort . ':' . $bindHost . ':' . $bindPort,
+                '-p',
+                $sshPort,
+                $sshUsername . '@' . $sshHost
+            ]
         );
 
-        $verifyCommands = [
-            'nc' => sprintf(
-                '%s -vz %s %d  > /dev/null 2>&1',
+        if (!empty($ncPath)) {
+            $this->verifyCommand = sprintf(
+                '%s -vz %s %d',
                 escapeshellcmd($ncPath),
                 escapeshellarg($localAddress),
                 $this->localPort
-            ),
-            'bash' => sprintf(
-                'timeout 1 %s -c %s > /dev/null 2>&1',
-                escapeshellcmd($bashPath),
-                escapeshellarg(
-                    sprintf(
-                        'cat < /dev/null > %s',
-                        escapeshellarg(
-                            sprintf('/dev/tcp/%s/%d', $localAddress, $this->localPort)
-                        )
-                    )
-                )
-            )
-        ];
-        if (!empty($verifyMethod)) {
-            $this->verifyCommand = $verifyCommands[$verifyMethod];
+            );
         }
 
         if ($autoConnect) {
@@ -189,32 +176,23 @@ class SshTunnel
             return true;
         }
 
-        if (isset($this->lsofCommand)) {
-            if (!$this->isLocalPortAvailable()) {
-                throw new ErrorException(
-                    sprintf(
-                        "Local port %d is not available.\nVerified with: %s",
-                        $this->localPort,
-                        sprintf($this->lsofCommand, $this->localPort)
-                    )
-                );
-            }
-        }
-
-        $this->sshProcess = $this->openProcess($this->sshCommand);
-        $procDetails = proc_get_status($this->sshProcess);
-        if (!$procDetails['running']) {
+        if (false === $this->isLocalPortAvailable()) {
             throw new ErrorException(
                 sprintf(
-                    "SSH Tunnel process is not running after creation.\nCommand: %s",
-                    $this->sshCommand
+                    "Local port %d is not available.\nVerified with: %s",
+                    $this->localPort,
+                    sprintf($this->lsofCommand, $this->localPort)
                 )
             );
         }
+
+        $this->sshProcess = $this->openProcess($this->sshCommand);
+
+        // Ensure we wait long enough for it to actually connect.
         usleep($this->waitMs);
 
         for ($i = 0; $i < $this->tries; $i++) {
-            if ($this->verifyTunnel()) {
+            if (false !== $this->verifyTunnel()) {
                 return true;
             }
             // Wait a bit until next iteration
@@ -223,8 +201,8 @@ class SshTunnel
 
         throw new ErrorException(
             sprintf(
-                "SSH tunnel not working.\nCreated with: %s\nVerified with: %s",
-                $this->sshCommand,
+                "SSH tunnel is not working.\nCreated with: %s\nVerified with: %s",
+                implode(' ', $this->sshCommand),
                 $this->verifyCommand
             )
         );
@@ -236,11 +214,8 @@ class SshTunnel
      */
     public function disconnect(): bool
     {
-        if ($this->sshProcess) {
-            $procStatus = proc_get_status($this->sshProcess);
-            /** @TODO The SSH process does not get killed (at least on MacOS) because it has a different PID. */
-            posix_kill($procStatus['pid'], 9);
-            proc_terminate($this->sshProcess, 9);
+        if (!empty($this->sshProcess['proc'])) {
+            $this->closeProcess($this->sshProcess, true);
             return true;
         }
         return false;
@@ -256,36 +231,66 @@ class SshTunnel
         if (empty($this->verifyCommand)) {
             return null;
         }
-        return (0 === $this->runCommand($this->verifyCommand));
+        return (0 === $this->runCommand($this->verifyCommand, [2 => ['file', '/dev/null', 'w']]));
     }
 
     /**
-     * @param string $command
-     * @return resource
+     * @param string|array<string> $command
+     * @param array<resource|array<string>> $descriptorSpec
+     * @return array<resource|array<resource>>
      * @throws \ErrorException
      */
-    protected function openProcess(string $command): mixed
-    {
-        $pipes = [];
-        $process = proc_open(
+    protected function openProcess(
+        string | array $command,
+        array $descriptorSpec = []
+    ): array {
+        $result = [
+            'pipes' => []
+        ];
+        $result['proc'] = proc_open(
             $command,
-            [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
-            $pipes
+            $descriptorSpec,
+            $result['pipes']
         );
-        if (!is_resource($process)) {
+        if (!is_resource($result['proc'])) {
             throw new ErrorException(sprintf("Error executing command: %s", $command));
         }
-        return $process;
+        $procStatus = proc_get_status($result['proc']);
+        if (!$procStatus['running'] || !$procStatus['pid']) {
+            throw new ErrorException(sprintf("Process is not running. Command: %s", $command));
+        }
+        return $result;
+    }
+
+    /**
+     * Close a process opened by openProcess()
+     * @param array<resource|array<resource>> $process
+     * @param bool $kill
+     * @return int
+     */
+    protected function closeProcess(array $process, bool $kill = false): int
+    {
+        foreach ($process['pipes'] as $pipe) {
+            fclose($pipe);
+        }
+        if ($kill) {
+            proc_terminate($process['proc']);
+            proc_terminate($process['proc'], 9);
+        }
+        return proc_close($process['proc']);
     }
 
     /**
      * Runs a command, returns exit code.
      * @param string $command
+     * @param array<resource|array<string>> $descriptorSpec
      * @return int 0 means Success.
      * @throws \ErrorException
      */
-    protected function runCommand(string $command): int
-    {
-        return proc_close($this->openProcess($command));
+    protected function runCommand(
+        string $command,
+        array $descriptorSpec = []
+    ): int {
+        return $this->closeProcess($this->openProcess($command, $descriptorSpec));
     }
 }

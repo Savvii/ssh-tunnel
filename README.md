@@ -38,7 +38,7 @@ function connect(): void
 }
 
 connect();
-// At this point the SSH tunnel is disconnected because `$tunnel` went out of scope.
+// At this point the SSH tunnel is disconnected because $tunnel went out of scope.
 ```
 
 This will work:
@@ -58,11 +58,9 @@ to make it not go out of scope when the constructor is finished.
 
 ## Requirements
 
-- PHP 8.0 or greater
-- PHP functions `proc_open` and `proc_terminate` enabled
 - Linux, MacOS or FreeBSD
-- Binary `nohup`
+- PHP 8.0 or greater
+- PHP functions `proc_open`,`proc_close`,`proc_terminate` and `proc_get_status` enabled
 - Binary `ssh`
-- Optionally `lsof`, used by default but can be skipped.
-- Optionally `nc`, used by default but can be skipped.
-- Optionally `bash`, not used by default.
+- Binary `lsof`, used by default but can be skipped.
+- Binary `nc`, used by default but can be skipped.
