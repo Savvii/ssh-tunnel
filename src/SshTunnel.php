@@ -237,7 +237,10 @@ class SshTunnel
     public function disconnect(): bool
     {
         if ($this->sshProcess) {
-            proc_terminate($this->sshProcess);
+            $procStatus = proc_get_status($this->sshProcess);
+            /** @TODO The SSH process does not get killed (at least on MacOS) because it has a different PID. */
+            posix_kill($procStatus['pid'], 9);
+            proc_terminate($this->sshProcess, 9);
             return true;
         }
         return false;
