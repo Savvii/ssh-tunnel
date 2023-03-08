@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+
+# get bash colors and styles here:
+# http://misc.flogisoft.com/bash/tip_colors_and_formatting
+C_RESET='\e[0m'
+C_RED='\e[31m'
+C_GREEN='\e[32m'
+C_YELLOW='\e[33m'
+RESIZE=$(resize)
+
+function __run() #(step, name, cmd)
+{
+    local output exit_code
+
+    printf "${C_YELLOW}[%s]${C_RESET} %-30s" "$1" "$2"
+    output=$(eval "$RESIZE $3" 2>&1)
+    exit_code=$?
+
+    if [[ 0 == "$exit_code" || 130 == "$exit_code" ]]; then
+        printf "${C_GREEN}OK!${C_RESET}\n"
+    else
+        printf "${C_RED}NOK!${C_RESET}\n\n%s\n" "$output"
+        exit 1
+    fi
+}
+
+modified="git diff --diff-filter=M --name-only --cached  | grep \".php$\""
+ignore="**/vendor"
+
+__run "1/4" "PHP Code Beautifier and Fixer" "${modified} | xargs -r vendor/bin/phpcbf --standard=PSR12 --ignore=${ignore} || true" # Ignore exit code
+__run "2/4" "PHP Lint" "${modified} | xargs -L1 -r php -l >/dev/null"
+__run "3/4" "PHP CodeSniffer" "${modified} | xargs -r vendor/bin/phpcs --report=emacs --colors --standard=PSR12 --ignore=${ignore} -s"
+__run "4/4" "PHPStan" "${modified} | xargs -r vendor/bin/phpstan analyse --memory-limit=2G -c phpstan.neon --xdebug"

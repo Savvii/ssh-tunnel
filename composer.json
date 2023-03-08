@@ -1,0 +1,40 @@
+{
+  "name": "savvii/ssh-tunnel",
+  "description": "Small library to create an SSH tunnel, for example for MySQL",
+  "type": "library",
+  "license": "MIT",
+  "authors": [
+    {
+      "name": "Jeroen Vermeulen",
+      "email": "jeroen@savvii.com",
+      "homepage": "https://www.savvii.com",
+      "role": "Developer"
+    }
+  ],
+  "autoload": {
+    "psr-4": {
+      "Savvii\\SshTunnel\\": "src/"
+    }
+  },
+  "minimum-stability": "stable",
+  "require": {
+    "php": ">=8.0"
+  },
+  "require-dev": {
+    "squizlabs/php_codesniffer": "^3.7",
+    "phpstan/phpstan": "^1.9",
+    "phpmd/phpmd": "^2.13"
+  },
+  "scripts": {
+    "all": [
+      "@phpcbf",
+      "@phplint",
+      "@phpcs",
+      "@phpstan"
+    ],
+    "phpcbf": "vendor/bin/phpcbf --standard=PSR12 --ignore='**/vendor' .",
+    "phplint": "find . -not -path './vendor/*' -name '*.php' -exec php -l {} \\; >/dev/null",
+    "phpcs": "vendor/bin/phpcs --report=code --colors --report-width=120 --standard=PSR12 --ignore='**/vendor' -s .",
+    "phpstan": "vendor/bin/phpstan analyse --memory-limit=2G -c phpstan.neon --error-format=github --xdebug"
+  }
+}
