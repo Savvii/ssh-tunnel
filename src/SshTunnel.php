@@ -8,6 +8,7 @@ declare(strict_types=1);
 
 namespace Savvii\SshTunnel;
 
+use InvalidArgumentException;
 use ErrorException;
 
 class SshTunnel
@@ -26,10 +27,22 @@ class SshTunnel
     protected string $sshCommand;
 
     /**
+     * The command for creating a tunnel with nohup
+     * @var string
+     */
+    protected string $nohupSshCommand;
+
+    /**
      * Command for checking if the tunnel is open
      * @var string
      */
     protected string $verifyCommand;
+
+    /**
+     * The command for destroying the SSH tunnel
+     * @var string
+     */
+    protected string $destroyCommand;
 
     /**
      * The command for checking local ports in use
@@ -44,12 +57,6 @@ class SshTunnel
     protected static int $assignPort = 2049;
 
     /**
-     * The SSH process opened using proc_open
-     * @var resource|false
-     */
-    protected $sshProcess;
-
-    /**
      * Constructor
      *
      * @param string $sshUsername
@@ -60,7 +67,6 @@ class SshTunnel
      * @param string $bindHost Hostname or IP of the remote side of the tunnel. This can also be another server which
      *                         is reachable from inside the SSH Host. 127.0.0.1 by default (localhost on the SSH Host).
      * @param int $bindPort Port of the remote side of the tunnel, 3306 by default.
-     * @param string $verifyMethod Can be 'nc', 'bash' or empty to skip verify.
      * @param string $identityFile A file containing your private key. Empty by default.
      * @param int $waitMs Milliseconds to wait after connecting, 1000000 = 1 second by default.
      * @param int $tries Number of attempts to verify connection.
@@ -69,10 +75,12 @@ class SshTunnel
      * @param bool $autoConnect If true (default) the SSH tunnel will be connected on creation of this object.
      * @param bool $autoDisconnect If true (default) the SSH tunnel will be removed when this object is destroyed.
      * @param string $sshPath Path to 'ssh' binary.
-     * @param string $lsofPath Path to 'lsof' binary. Can be set to empty to skip check if local port is available.
-     * @param string $ncPath Path to 'nc' binary.
-     * @param string $bashPath Path to 'bash' binary.
+     * @param string $nohupPath Path to 'nohup' binary.
+     * @param string $lsofPath Path to 'lsof' binary, used to check if local port is available. Can be empty.
+     * @param string $ncPath Path to 'nc' binary, used to verify the SSH tunnel is working. Can be empty.
+     * @param string $pkillPath Path to 'pkill' binary, used to terminate the SSH connection. Can be empty.
      * @throws \ErrorException
+     * @throws \InvalidArgumentException
      */
     public function __construct(
         string $sshUsername,
@@ -82,7 +90,6 @@ class SshTunnel
         int $localPort = 0,
         string $bindHost = '127.0.0.1',
         int $bindPort = 3306,
-        string $verifyMethod = 'bash',
         string $identityFile = '',
         protected int $waitMs = 1000000,
         protected int $tries = 10,
@@ -91,9 +98,10 @@ class SshTunnel
         bool $autoConnect = true,
         protected bool $autoDisconnect = true,
         string $sshPath = 'ssh',
+        string $nohupPath = 'nohup',
         string $lsofPath = 'lsof',
         string $ncPath = 'nc',
-        string $bashPath = 'bash'
+        string $pkillPath = 'pkill'
     ) {
         if (!empty($lsofPath)) {
             $this->lsofCommand = sprintf(
@@ -113,7 +121,7 @@ class SshTunnel
             $sshOptions .= ' -i ' . escapeshellarg($identityFile);
         }
         $this->sshCommand = sprintf(
-            '%s %s -N -L %d:%s:%d -p %d %s@%s >> %s 2>&1',
+            '%s %s -N -L %d:%s:%d -p %d %s@%s',
             escapeshellcmd($sshPath),
             $sshOptions,
             $this->localPort,
@@ -121,32 +129,42 @@ class SshTunnel
             $bindPort,
             $sshPort,
             escapeshellarg($sshUsername),
-            escapeshellarg($sshHost),
+            escapeshellarg($sshHost)
+        );
+
+        $this->nohupSshCommand = sprintf(
+            '%s %s >> %s 2>&1 &',
+            escapeshellcmd($nohupPath),
+            $this->sshCommand,
             escapeshellarg($logPath)
         );
 
-        $verifyCommands = [
-            'nc' => sprintf(
-                '%s -vz %s %d  > /dev/null 2>&1',
+        if (!empty($ncPath)) {
+            $this->verifyCommand = sprintf(
+                '%s -vz %s %d >> %s 2>&1',
                 escapeshellcmd($ncPath),
                 escapeshellarg($localAddress),
-                $this->localPort
-            ),
-            'bash' => sprintf(
-                'timeout 1 %s -c %s > /dev/null 2>&1',
-                escapeshellcmd($bashPath),
-                escapeshellarg(
-                    sprintf(
-                        'cat < /dev/null > %s',
-                        escapeshellarg(
-                            sprintf('/dev/tcp/%s/%d', $localAddress, $this->localPort)
-                        )
-                    )
-                )
-            )
-        ];
-        if (!empty($verifyMethod)) {
-            $this->verifyCommand = $verifyCommands[$verifyMethod];
+                $this->localPort,
+                escapeshellarg($logPath)
+            );
+        }
+
+        if (empty($pkillPath) && $this->autoDisconnect) {
+            throw new InvalidArgumentException("You can't use autoDisconnect without pkillPath.");
+        }
+
+        if (!empty($pkillPath)) {
+            $psCommand = $this->sshCommand;
+            // Replace multiple spaces by one
+            $psCommand = preg_replace('/\s{2,}/', ' ', $psCommand);
+            // Remove quotes
+            $psCommand = str_replace("'", '', $psCommand);
+            $this->destroyCommand = sprintf(
+                '%s -f %s >> %s 2>&1',
+                escapeshellcmd($pkillPath),
+                escapeshellarg($psCommand),
+                escapeshellarg($logPath)
+            );
         }
 
         if ($autoConnect) {
@@ -167,7 +185,6 @@ class SshTunnel
     /**
      * Check if the local port is available.
      * @return ?bool Null when there is no method to verify.
-     * @throws \ErrorException
      */
     public function isLocalPortAvailable(): ?bool
     {
@@ -189,32 +206,30 @@ class SshTunnel
             return true;
         }
 
-        if (isset($this->lsofCommand)) {
-            if (!$this->isLocalPortAvailable()) {
-                throw new ErrorException(
-                    sprintf(
-                        "Local port %d is not available.\nVerified with: %s",
-                        $this->localPort,
-                        sprintf($this->lsofCommand, $this->localPort)
-                    )
-                );
-            }
-        }
-
-        $this->sshProcess = $this->openProcess($this->sshCommand);
-        $procDetails = proc_get_status($this->sshProcess);
-        if (!$procDetails['running']) {
+        if (false === $this->isLocalPortAvailable()) {
             throw new ErrorException(
                 sprintf(
-                    "SSH Tunnel process is not running after creation.\nCommand: %s",
-                    $this->sshCommand
+                    "Local port %d is not available.\nVerified with: %s",
+                    $this->localPort,
+                    sprintf($this->lsofCommand, $this->localPort)
                 )
             );
         }
+
+        if (0 !== $this->runCommand($this->nohupSshCommand)) {
+            throw new ErrorException(
+                sprintf(
+                    "Could Not Create SSH Tunnel.\nCommand: %s",
+                    $this->nohupSshCommand
+                )
+            );
+        }
+
+        // Ensure we wait long enough for it to actually connect.
         usleep($this->waitMs);
 
         for ($i = 0; $i < $this->tries; $i++) {
-            if ($this->verifyTunnel()) {
+            if (false !== $this->verifyTunnel()) {
                 return true;
             }
             // Wait a bit until next iteration
@@ -224,7 +239,7 @@ class SshTunnel
         throw new ErrorException(
             sprintf(
                 "SSH tunnel not working.\nCreated with: %s\nVerified with: %s",
-                $this->sshCommand,
+                $this->nohupSshCommand,
                 $this->verifyCommand
             )
         );
@@ -236,17 +251,15 @@ class SshTunnel
      */
     public function disconnect(): bool
     {
-        if ($this->sshProcess) {
-            proc_terminate($this->sshProcess);
-            return true;
+        if (empty($this->destroyCommand)) {
+            return false;
         }
-        return false;
+        return (0 === $this->runCommand($this->destroyCommand));
     }
 
     /**
      * Verifies whether the tunnel is active or not.
      * @return ?bool Null when there is no method to verify.
-     * @throws \ErrorException
      */
     public function verifyTunnel(): ?bool
     {
@@ -257,32 +270,15 @@ class SshTunnel
     }
 
     /**
-     * @param string $command
-     * @return resource
-     * @throws \ErrorException
-     */
-    protected function openProcess(string $command): mixed
-    {
-        $pipes = [];
-        $process = proc_open(
-            $command,
-            [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
-            $pipes
-        );
-        if (!is_resource($process)) {
-            throw new ErrorException(sprintf("Error executing command: %s", $command));
-        }
-        return $process;
-    }
-
-    /**
      * Runs a command, returns exit code.
      * @param string $command
      * @return int 0 means Success.
-     * @throws \ErrorException
      */
     protected function runCommand(string $command): int
     {
-        return proc_close($this->openProcess($command));
+        $output = [];
+        $exitCode = 1;
+        exec($command, $output, $exitCode);
+        return $exitCode;
     }
 }

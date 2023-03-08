@@ -59,10 +59,10 @@ to make it not go out of scope when the constructor is finished.
 ## Requirements
 
 - PHP 8.0 or greater
-- PHP functions `proc_open` and `proc_terminate` enabled
+- PHP function `exec` enabled
 - Linux, MacOS or FreeBSD
 - Binary `nohup`
 - Binary `ssh`
-- Optionally `lsof`, used by default but can be skipped.
-- Optionally `nc`, used by default but can be skipped.
-- Optionally `bash`, not used by default.
+- Binary `pkill`, used by default but can be skipped.
+- Binary `lsof`, used by default but can be skipped.
+- Binary `nc`, used by default but can be skipped.
