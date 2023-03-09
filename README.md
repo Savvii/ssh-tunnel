@@ -12,13 +12,14 @@ $tunnel = new SshTunnel(
     sshUsername: 'myuser',
     sshHost: 'jumpserver.example.com',
     sshPort: 22,
-    bindHost: 'remote-db-host.local',
+    bindHost: 'remote-db-host.local.lan',
     bindPort: 3306    
 );
 
 $db = new PDO(
     sprintf(
-        "mysql:host=127.0.0.1;port=%d",
+        "mysql:host=%s;port=%d",
+        $tunnel->localAddress,
         $tunnel->localPort
     )
 );
