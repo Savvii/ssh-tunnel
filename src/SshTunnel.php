@@ -161,7 +161,10 @@ class SshTunnel
         if (empty($this->lsofCommand)) {
             return null;
         }
-        return (1 === $this->runCommand(sprintf($this->lsofCommand, $this->localPort)));
+        return (1 === $this->runCommand(
+                sprintf($this->lsofCommand, $this->localPort),
+                [1 => ['file', '/dev/null', 'w']]
+            ));
     }
 
     /**
