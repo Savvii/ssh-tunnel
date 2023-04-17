@@ -30,4 +30,4 @@ ignore="**/vendor"
 __run "1/4" "PHP Code Beautifier and Fixer" "${modified} | xargs -r vendor/bin/phpcbf --standard=PSR12 --ignore=${ignore} || true" # Ignore exit code
 __run "2/4" "PHP Lint" "${modified} | xargs -L1 -r php -l >/dev/null"
 __run "3/4" "PHP CodeSniffer" "${modified} | xargs -r vendor/bin/phpcs --report=emacs --colors --standard=PSR12 --ignore=${ignore} -s"
-__run "4/4" "PHPStan" "${modified} | xargs -r vendor/bin/phpstan analyse --memory-limit=2G -c phpstan.neon --xdebug"
+__run "4/4" "PHPStan" "${modified} | xargs -r vendor/bin/phpstan analyse --memory-limit=2G -c phpstan.neon"

@@ -34,6 +34,6 @@
     "phpcbf": "vendor/bin/phpcbf --standard=PSR12 --ignore='**/vendor' .",
     "phplint": "find . -not -path './vendor/*' -name '*.php' -exec php -l {} \\; >/dev/null",
     "phpcs": "vendor/bin/phpcs --report=code --colors --report-width=120 --standard=PSR12 --ignore='**/vendor' -s .",
-    "phpstan": "vendor/bin/phpstan analyse --memory-limit=2G -c phpstan.neon --error-format=github --xdebug"
+    "phpstan": "vendor/bin/phpstan analyse --memory-limit=2G -c phpstan.neon --error-format=github"
   }
 }
